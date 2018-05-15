@@ -12,19 +12,23 @@ import (
 	"github.com/pachyderm/pachyderm/src/client/auth"
 )
 
-// renew renews the caller's credentials (and extends the TTL of their Pachyderm
+// Renew renews the caller's credentials (and extends the TTL of their Pachyderm
 // token by sending a request to Pachyderm). Unlike other handlers, it doesn't
-// get assigned to a path; instead it's placed in Backend.AuthRenew in
-// backend.go
-func (b *backend) renew(ctx context.Context, req *logical.Request, d *framework.FieldData) (resp *logical.Response, retErr error) {
+// get assigned to a path; instead it's placed in Backend.Renew in backend.go
+func (b *backend) Renew(ctx context.Context, req *logical.Request, d *framework.FieldData) (resp *logical.Response, retErr error) {
 	// renew seems to be handled specially, and req.ID doesn't seem to be set
 	b.Logger().Debug(fmt.Sprintf("%s received at %s", req.Operation, req.Path))
 	defer func() {
 		b.Logger().Debug(fmt.Sprintf("%s finished at %s (success=%t)", req.Operation, req.Path, retErr == nil && !resp.IsError()))
 	}()
 
-	if req.Auth == nil {
-		return nil, errors.New("request auth was nil")
+	tokenIface, ok := req.Secret.InternalData["user_token"]
+	if !ok {
+		return errMissingField(key)
+	}
+	userToken, ok := getStringField(data, "user_token")
+	if !ok {
+		return logical.ErrorResponse(fmt.Sprintf("invalid type for param '%s' (expected string but got %T)", key, valueIface))
 	}
 
 	config, err := getConfig(ctx, req.Storage)
@@ -36,15 +40,6 @@ func (b *backend) renew(ctx context.Context, req *logical.Request, d *framework.
 	}
 	if len(config.PachdAddress) == 0 {
 		return nil, errors.New("plugin is missing pachd_address")
-	}
-
-	userTokenIface, ok := req.Auth.InternalData["user_token"]
-	if !ok {
-		return nil, errors.New("no internal user token found in the store")
-	}
-	userToken, ok := userTokenIface.(string)
-	if !ok {
-		return nil, errors.New("stored user token is not a string")
 	}
 
 	ttl, maxTTL, err := b.SanitizeTTLStr(config.TTL, b.System().MaxLeaseTTL().String())

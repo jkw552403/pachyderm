@@ -14,14 +14,19 @@ import (
 
 func (b *backend) loginPath() *framework.Path {
 	return &framework.Path{
-		Pattern: "login",
+		// Pattern uses modified version of framework.GenericNameRegex which
+		// requires a single colon
+		Pattern: "login/(?P<username>\\w[\\w-]*:[\\w-]*\\w)",
 		Fields: map[string]*framework.FieldSchema{
 			"username": &framework.FieldSchema{
 				Type: framework.TypeString,
 			},
+			"ttl": &framework.FieldSchema{
+				Type: framework.TypeString,
+			},
 		},
 		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.UpdateOperation: b.pathAuthLogin,
+			logical.ReadOperation: b.pathAuthLogin,
 		},
 	}
 }
@@ -32,9 +37,13 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 		b.Logger().Debug(fmt.Sprintf("(%s) %s finished at %s (success=%t)", req.ID, req.Operation, req.Path, retErr == nil && !resp.IsError()))
 	}()
 
-	username := d.Get("username").(string)
-	if len(username) == 0 {
-		return nil, logical.ErrInvalidRequest
+	username, errResp := getStringField(d, "username")
+	if errResp != nil {
+		return errResp, nil
+	}
+	ttlField, errResp := getStringField(d, "ttl")
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	config, err := getConfig(ctx, req.Storage)
@@ -51,7 +60,12 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 		return nil, errors.New("plugin is missing ttl")
 	}
 
-	ttl, _, err := b.SanitizeTTLStr(config.TTL, b.System().MaxLeaseTTL().String())
+	var ttl time.Duration
+	if ttlField != "" {
+		ttl, _, err = b.SanitizeTTLStr(ttlField, b.System().MaxLeaseTTL().String())
+	} else {
+		ttl, _, err = b.SanitizeTTLStr(config.TTL, b.System().MaxLeaseTTL().String())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -62,18 +76,18 @@ func (b *backend) pathAuthLogin(ctx context.Context, req *logical.Request, d *fr
 	}
 
 	return &logical.Response{
-		Auth: &logical.Auth{
+		Secret: &logical.Secret{
 			InternalData: map[string]interface{}{
 				"user_token": userToken,
-			},
-			Metadata: map[string]string{
-				"user_token":    userToken,
-				"pachd_address": config.PachdAddress,
 			},
 			LeaseOptions: logical.LeaseOptions{
 				TTL:       ttl,
 				Renewable: true,
 			},
+		},
+		Data: map[string]interface{}{
+			"user_token":    userToken,
+			"pachd_address": config.PachdAddress,
 		},
 	}, nil
 }

@@ -131,7 +131,7 @@ func TestMinimalConfig(t *testing.T) {
 	}
 
 	vl := v.Logical()
-	secret, err := vl.Read(
+	resp, err := vl.Read(
 		fmt.Sprintf("/%v/config", pluginName),
 	)
 
@@ -139,13 +139,13 @@ func TestMinimalConfig(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	if secret.Data["pachd_address"] != c.GetAddress() {
+	if resp.Data["pachd_address"] != c.GetAddress() {
 		t.Fatalf("pachd_address configured incorrectly")
 	}
-	if secret.Data["ttl"] == "0s" {
+	if resp.Data["ttl"] == "0s" {
 		t.Fatalf("ttl configured incorrectly")
 	}
-	ttlIface, ok := secret.Data["ttl"]
+	ttlIface, ok := resp.Data["ttl"]
 	if !ok {
 		t.Fatalf("ttl wasn't set in config, but it should always have a default value")
 	}
@@ -158,7 +158,7 @@ func TestMinimalConfig(t *testing.T) {
 		t.Fatalf("could not parse duration (%s) from config: %v", ttlStr, err)
 	}
 	if ttl < (30 * time.Second) {
-		t.Fatalf("ttl configured incorrectly; should take default vaule but is actually (%v)", secret.Data["ttl"])
+		t.Fatalf("ttl configured incorrectly; should take default vaule but is actually (%v)", resp.Data["ttl"])
 	}
 
 }
@@ -177,23 +177,20 @@ func loginHelper(t *testing.T, ttl string) (*client.APIClient, *vault.Client, *v
 		t.Fatalf(err.Error())
 	}
 
-	params := make(map[string]interface{})
-	params["username"] = "bogusgithubusername"
 	vl := v.Logical()
-	secret, err := vl.Write(
-		fmt.Sprintf("/%v/login", pluginName),
-		params,
+	resp, err := vl.Read(
+		fmt.Sprintf("/%v/login/github:bogusgithubusername", pluginName),
 	)
 
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 
-	pachToken, ok := secret.Auth.Metadata["user_token"]
+	pachToken, ok := resp.Data["user_token"].(string)
 	if !ok {
 		t.Fatalf("vault login response did not contain user token")
 	}
-	reportedPachdAddress, ok := secret.Auth.Metadata["pachd_address"]
+	reportedPachdAddress, ok := resp.Data["pachd_address"].(string)
 	if !ok {
 		t.Fatalf("vault login response did not contain pachd address")
 	}
@@ -204,7 +201,7 @@ func loginHelper(t *testing.T, ttl string) (*client.APIClient, *vault.Client, *v
 	}
 	c.SetAuthToken(pachToken)
 
-	return c, v, secret
+	return c, v, resp
 }
 
 func TestLogin(t *testing.T) {
